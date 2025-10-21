@@ -32,6 +32,10 @@
 #endif
 #endif /* HAVE_SSL */
 
+#ifdef PQC_ALGO_FL_DSA
+#include <oqs/oqs.h>
+#endif
+
 ldns_lookup_table ldns_signing_algorithms[] = {
         { LDNS_SIGN_RSAMD5, "RSAMD5" },
         { LDNS_SIGN_RSASHA1, "RSASHA1" },
@@ -52,6 +56,9 @@ ldns_lookup_table ldns_signing_algorithms[] = {
 #endif
 #ifdef USE_ED448
 	{ LDNS_SIGN_ED448, "ED448" },
+#endif
+#ifdef PQC_ALGO_FL_DSA
+	{ LDNS_SIGN_FL_DSA_512, "FL-DSA-512" },
 #endif
 #ifdef USE_DSA
         { LDNS_SIGN_DSA, "DSA" },
@@ -602,6 +609,11 @@ ldns_key_new_frm_fp_l(ldns_key **key, FILE *fp, int *line_nr)
 	if (strncmp(d, "165 HMAC-SHA512", 4) == 0) {
 		alg = LDNS_SIGN_HMACSHA512;
 	}
+#ifdef PQC_ALGO_FL_DSA
+	if (strncmp(d, "244 FL-DSA-512", 4) == 0) {
+		alg = LDNS_SIGN_FL_DSA_512;
+	}
+#endif
 	LDNS_FREE(d);
 
 	switch(alg) {
@@ -708,6 +720,19 @@ ldns_key_new_frm_fp_l(ldns_key **key, FILE *fp, int *line_nr)
 				return LDNS_STATUS_ERR;
 			}
 #endif /* splint */
+			break;
+#endif
+#ifdef PQC_ALGO_FL_DSA
+		case LDNS_SIGN_FL_DSA_512:
+			ldns_key_set_algorithm(k, alg);
+			{
+				oqs_key *oqs = ldns_key_new_frm_fp_fl_dsa_l(fp, line_nr);
+				if (!oqs) {
+					ldns_key_free(k);
+					return LDNS_STATUS_ERR;
+				}
+				k->_key.oqs = oqs;
+			}
 			break;
 #endif
 		default:
@@ -1045,6 +1070,92 @@ ldns_key_new_frm_fp_hmac_l( FILE *f
 }
 #endif /* HAVE_SSL */
 
+#ifdef PQC_ALGO_FL_DSA
+oqs_key*
+ldns_key_new_frm_fp_fl_dsa_l(FILE *f, int *line_nr)
+{
+	char d[LDNS_MAX_LINELEN];
+	oqs_key *oqs = NULL;
+	unsigned char *sk = NULL;
+	unsigned char *pk = NULL;
+	size_t sk_len = 0;
+	size_t pk_len = 0;
+	size_t i;
+
+	/* Allocate oqs_key structure */
+	oqs = LDNS_MALLOC(oqs_key);
+	if (!oqs) {
+		return NULL;
+	}
+	memset(oqs, 0, sizeof(oqs_key));
+
+	/* Read PrivateKey: field */
+	if (ldns_fget_keyword_data_l(f, "PrivateKey", ": ", d, "\n",
+	                              LDNS_MAX_LINELEN, line_nr) == -1) {
+		LDNS_FREE(oqs);
+		return NULL;
+	}
+
+	/* Convert hex string to binary */
+	sk_len = strlen(d) / 2;
+	sk = LDNS_XMALLOC(unsigned char, sk_len);
+	if (!sk) {
+		LDNS_FREE(oqs);
+		return NULL;
+	}
+
+	for (i = 0; i < sk_len; i++) {
+		unsigned int byte;
+		if (sscanf(d + i * 2, "%2x", &byte) != 1) {
+			LDNS_FREE(sk);
+			LDNS_FREE(oqs);
+			return NULL;
+		}
+		sk[i] = (unsigned char)byte;
+	}
+
+	/* Read PublicKey: field */
+	if (ldns_fget_keyword_data_l(f, "PublicKey", ": ", d, "\n",
+	                              LDNS_MAX_LINELEN, line_nr) == -1) {
+		LDNS_FREE(sk);
+		LDNS_FREE(oqs);
+		return NULL;
+	}
+
+	/* Convert hex string to binary */
+	pk_len = strlen(d) / 2;
+	pk = LDNS_XMALLOC(unsigned char, pk_len);
+	if (!pk) {
+		LDNS_FREE(sk);
+		LDNS_FREE(oqs);
+		return NULL;
+	}
+
+	for (i = 0; i < pk_len; i++) {
+		unsigned int byte;
+		if (sscanf(d + i * 2, "%2x", &byte) != 1) {
+			LDNS_FREE(pk);
+			LDNS_FREE(sk);
+			LDNS_FREE(oqs);
+			return NULL;
+		}
+		pk[i] = (unsigned char)byte;
+	}
+
+	/* Set up the oqs_key structure */
+	oqs->sk = sk;
+	oqs->sk_len = (uint32_t)sk_len;
+	oqs->pk = pk;
+	oqs->pk_len = (uint32_t)pk_len;
+	oqs->alg_id = LDNS_XMALLOC(char, strlen(LDNS_SIGN_FL_DSA_512_SCHEME) + 1);
+	if (oqs->alg_id) {
+		strcpy(oqs->alg_id, LDNS_SIGN_FL_DSA_512_SCHEME);
+	}
+
+	return oqs;
+}
+#endif /* PQC_ALGO_FL_DSA */
+
 #ifdef USE_GOST
 static EVP_PKEY*
 ldns_gen_gost_key(void)
@@ -1314,6 +1425,53 @@ ldns_key_new_frm_algorithm(ldns_signing_algorithm alg, uint16_t size)
 #endif
 			break;
 #endif /* ED448 */
+#ifdef PQC_ALGO_FL_DSA
+		case LDNS_SIGN_FL_DSA_512:
+		{
+			OQS_SIG *oqs_sig = OQS_SIG_new(LDNS_SIGN_FL_DSA_512_SCHEME);
+			if (!oqs_sig) {
+				ldns_key_free(k);
+				return NULL;
+			}
+
+			k->_key.oqs = LDNS_MALLOC(oqs_key);
+			if (!k->_key.oqs) {
+				OQS_SIG_free(oqs_sig);
+				ldns_key_free(k);
+				return NULL;
+			}
+
+			k->_key.oqs->pk = LDNS_XMALLOC(uint8_t, oqs_sig->length_public_key);
+			k->_key.oqs->sk = LDNS_XMALLOC(uint8_t, oqs_sig->length_secret_key);
+			if (!k->_key.oqs->pk || !k->_key.oqs->sk) {
+				if (k->_key.oqs->pk) LDNS_FREE(k->_key.oqs->pk);
+				if (k->_key.oqs->sk) LDNS_FREE(k->_key.oqs->sk);
+				LDNS_FREE(k->_key.oqs);
+				OQS_SIG_free(oqs_sig);
+				ldns_key_free(k);
+				return NULL;
+			}
+
+			if (OQS_SIG_keypair(oqs_sig, k->_key.oqs->pk, k->_key.oqs->sk) != OQS_SUCCESS) {
+				LDNS_FREE(k->_key.oqs->pk);
+				LDNS_FREE(k->_key.oqs->sk);
+				LDNS_FREE(k->_key.oqs);
+				OQS_SIG_free(oqs_sig);
+				ldns_key_free(k);
+				return NULL;
+			}
+
+			k->_key.oqs->pk_len = oqs_sig->length_public_key;
+			k->_key.oqs->sk_len = oqs_sig->length_secret_key;
+			k->_key.oqs->alg_id = LDNS_XMALLOC(char, strlen(LDNS_SIGN_FL_DSA_512_SCHEME) + 1);
+			if (k->_key.oqs->alg_id) {
+				strcpy(k->_key.oqs->alg_id, LDNS_SIGN_FL_DSA_512_SCHEME);
+			}
+
+			OQS_SIG_free(oqs_sig);
+			break;
+		}
+#endif /* PQC_ALGO_FL_DSA */
 	}
 	ldns_key_set_algorithm(k, alg);
 	return k;
@@ -2016,6 +2174,23 @@ ldns_key2rr(const ldns_key *k)
 			internal_data = 1;
 			break;
 #endif
+#ifdef PQC_ALGO_FL_DSA
+		case LDNS_SIGN_FL_DSA_512:
+			ldns_rr_push_rdf(pubkey, ldns_native2rdf_int8(
+				LDNS_RDF_TYPE_ALG, ldns_key_algorithm(k)));
+
+			if (k->_key.oqs && k->_key.oqs->pk) {
+				bin = LDNS_XMALLOC(unsigned char, k->_key.oqs->pk_len);
+				if (!bin) {
+					ldns_rr_free(pubkey);
+					return NULL;
+				}
+				memcpy(bin, k->_key.oqs->pk, k->_key.oqs->pk_len);
+				size = k->_key.oqs->pk_len;
+				internal_data = 1;
+			}
+			break;
+#endif
 		case LDNS_SIGN_HMACMD5:
 		case LDNS_SIGN_HMACSHA1:
 		case LDNS_SIGN_HMACSHA224:
@@ -2066,6 +2241,20 @@ ldns_key_deep_free(ldns_key *key)
 		hmac = ldns_key_hmac_key(key);
 		LDNS_FREE(hmac);
 	}
+#ifdef PQC_ALGO_FL_DSA
+	if (key->_key.oqs) {
+		if (key->_key.oqs->pk) {
+			LDNS_FREE(key->_key.oqs->pk);
+		}
+		if (key->_key.oqs->sk) {
+			LDNS_FREE(key->_key.oqs->sk);
+		}
+		if (key->_key.oqs->alg_id) {
+			LDNS_FREE(key->_key.oqs->alg_id);
+		}
+		LDNS_FREE(key->_key.oqs);
+	}
+#endif
 	LDNS_FREE(key);
 }
 

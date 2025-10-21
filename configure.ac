@@ -226,6 +226,19 @@ case "$enable_stderr_msgs" in
         ;;
 esac
 
+AC_ARG_ENABLE(pqc-algo-fl-dsa, AS_HELP_STRING([--enable-pqc-algo-fl-dsa[=algocode]],[Enables signing with FL-DSA signatures. Algocode defaults to 244]))
+pqc_algo_fl_dsa=""
+case "$enable_pqc_algo_fl_dsa" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_FL_DSA], [244], [Define this to enable zone signing with FL-DSA signatures])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_FL_DSA], [$enable_pqc_algo_fl_dsa], [Define this to enable zone signing with FL-DSA signatures])
+		;;
+esac
+
 AX_HAVE_POLL(
   [AX_CONFIG_FEATURE_ENABLE(poll)],
   [AX_CONFIG_FEATURE_DISABLE(poll)])

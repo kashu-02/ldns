@@ -14,7 +14,13 @@
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #include <openssl/md5.h>
+#endif /* HAVE_SSL */
 
+#ifdef PQC_ALGO_FL_DSA
+#include <oqs/oqs.h>
+#endif
+
+#ifdef HAVE_SSL
 ldns_dnssec_data_chain *
 ldns_dnssec_data_chain_new(void)
 {
@@ -1943,6 +1949,45 @@ ldns_verify_rrsig_ed448_raw(unsigned char* sig, size_t siglen,
 }
 #endif /* USE_ED448 */
 
+#ifdef PQC_ALGO_FL_DSA
+static ldns_status
+ldns_verify_rrsig_falcon512_raw(unsigned char* sig, size_t siglen,
+	ldns_buffer* rrset, unsigned char* key, size_t keylen)
+{
+	OQS_SIG *oqs_sig = OQS_SIG_new(LDNS_SIGN_FL_DSA_512_SCHEME);
+	if (!oqs_sig) {
+		return LDNS_STATUS_CRYPTO_BOGUS;
+	}
+
+	/* Verify the signature length */
+	if (siglen > oqs_sig->length_signature) {
+		OQS_SIG_free(oqs_sig);
+		return LDNS_STATUS_CRYPTO_BOGUS;
+	}
+
+	/* Verify the public key length */
+	if (keylen != oqs_sig->length_public_key) {
+		OQS_SIG_free(oqs_sig);
+		return LDNS_STATUS_CRYPTO_BOGUS;
+	}
+
+	/* Get the message that was signed */
+	unsigned char *message = (unsigned char*)ldns_buffer_begin(rrset);
+	size_t message_len = ldns_buffer_position(rrset);
+
+	/* Verify the signature */
+	ldns_status result;
+	if (OQS_SIG_verify(oqs_sig, message, message_len, sig, siglen, key) == OQS_SUCCESS) {
+		result = LDNS_STATUS_OK;
+	} else {
+		result = LDNS_STATUS_CRYPTO_BOGUS;
+	}
+
+	OQS_SIG_free(oqs_sig);
+	return result;
+}
+#endif /* PQC_ALGO_FL_DSA */
+
 #ifdef USE_ECDSA
 EVP_PKEY*
 ldns_ecdsa2pkey_raw(const unsigned char* key, size_t keylen, uint8_t algo)
@@ -2083,6 +2128,12 @@ ldns_verify_rrsig_buffers_raw(unsigned char* sig, size_t siglen,
 			key, keylen);
 		break;
 #endif
+#ifdef PQC_ALGO_FL_DSA
+	case LDNS_FL_DSA_512:
+		return ldns_verify_rrsig_falcon512_raw(sig, siglen, verify_buf,
+			key, keylen);
+		break;
+#endif
 	case LDNS_RSAMD5:
 		return ldns_verify_rrsig_rsamd5_raw(sig,
 									 siglen,
@@ -2188,6 +2239,9 @@ ldns_rrsig2rawsig_buffer(ldns_buffer* rawsig_buf, const ldns_rr* rrsig)
 #endif
 #ifdef USE_ED448
 	case LDNS_ED448:
+#endif
+#ifdef PQC_ALGO_FL_DSA
+	case LDNS_FL_DSA_512:
 #endif
 		if (ldns_rr_rdf(rrsig, 8) == NULL) {
 			return LDNS_STATUS_MISSING_RDATA_FIELDS_RRSIG;

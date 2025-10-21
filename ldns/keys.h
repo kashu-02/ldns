@@ -57,6 +57,9 @@ enum ldns_enum_algorithm
         LDNS_ECDSAP384SHA384    = 14,  /* RFC 6605 */
 	LDNS_ED25519		= 15,  /* RFC 8080 */
 	LDNS_ED448		= 16,  /* RFC 8080 */
+#ifdef PQC_ALGO_FL_DSA
+	LDNS_FL_DSA_512		= PQC_ALGO_FL_DSA,
+#endif
         LDNS_INDIRECT           = 252,
         LDNS_PRIVATEDNS         = 253,
         LDNS_PRIVATEOID         = 254
@@ -100,6 +103,9 @@ enum ldns_enum_signing_algorithm
 #if LDNS_BUILD_CONFIG_USE_ED448
 	LDNS_SIGN_ED448		 = LDNS_ED448,
 #endif /* LDNS_BUILD_CONFIG_USE_ED448 */
+#ifdef PQC_ALGO_FL_DSA
+	LDNS_SIGN_FL_DSA_512	 = LDNS_FL_DSA_512,
+#endif /* PQC_ALGO_FL_DSA */
 	LDNS_SIGN_HMACMD5	 = 157,	/* not official! This type is for TSIG, not DNSSEC */
 	LDNS_SIGN_HMACSHA1	 = 158,	/* not official! This type is for TSIG, not DNSSEC */
 	LDNS_SIGN_HMACSHA256 = 159,  /* ditto */
@@ -108,6 +114,25 @@ enum ldns_enum_signing_algorithm
 	LDNS_SIGN_HMACSHA512 = 165  /* ditto */
 };
 typedef enum ldns_enum_signing_algorithm ldns_signing_algorithm;
+
+#ifdef PQC_ALGO_FL_DSA
+#define LDNS_SIGN_FL_DSA_512_SCHEME "Falcon-512"
+#endif
+
+/**
+ * OQS key structure for post-quantum algorithms using liboqs
+ */
+#ifdef PQC_ALGO_FL_DSA
+struct oqs_key_param_set
+{
+	uint8_t* sk;        /* Secret key */
+	uint32_t sk_len;    /* Secret key length */
+	uint8_t* pk;        /* Public key */
+	uint32_t pk_len;    /* Public key length */
+	char* alg_id;       /* Algorithm identifier string */
+};
+typedef struct oqs_key_param_set oqs_key;
+#endif
 
 /**
  * General key structure, can contain all types of keys that
@@ -144,6 +169,10 @@ struct ldns_struct_key {
 		 *  key data
 		 */
 		void *external_key;
+#ifdef PQC_ALGO_FL_DSA
+		/** OQS key for post-quantum algorithms */
+		oqs_key *oqs;
+#endif
 	} _key;
 	/** Depending on the key we can have extra data */
 	union {
@@ -294,6 +323,16 @@ unsigned char *ldns_key_new_frm_fp_hmac(FILE *fp, size_t *hmac_size);
  * \return NULL on failure otherwise a newly allocated char buffer
  */
 unsigned char *ldns_key_new_frm_fp_hmac_l(FILE *fp, int *line_nr, size_t *hmac_size);
+
+#ifdef PQC_ALGO_FL_DSA
+/**
+ * Read FL-DSA-512 key from file
+ * \param[in] fp the file to parse
+ * \param[in] line_nr pointer to an integer containing the current line number (for error reporting purposes)
+ * \return NULL on failure otherwise a newly allocated oqs_key structure
+ */
+oqs_key *ldns_key_new_frm_fp_fl_dsa_l(FILE *fp, int *line_nr);
+#endif /* PQC_ALGO_FL_DSA */
 #endif /* LDNS_BUILD_CONFIG_HAVE_SSL */
 
 /* access write functions */

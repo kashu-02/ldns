@@ -212,3 +212,6 @@
 /wire2host.o
 /zone.lo
 /zone.o
+.claude/
+exp/
+result/

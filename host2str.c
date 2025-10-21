@@ -65,6 +65,9 @@ ldns_lookup_table ldns_algorithms[] = {
         { LDNS_ECDSAP384SHA384, "ECDSAP384SHA384"},
 	{ LDNS_ED25519, "ED25519"},
 	{ LDNS_ED448, "ED448"},
+#ifdef PQC_ALGO_FL_DSA
+	{ LDNS_FL_DSA_512, "FL-DSA-512"},
+#endif
         { LDNS_INDIRECT, "INDIRECT" },
         { LDNS_PRIVATEDNS, "PRIVATEDNS" },
         { LDNS_PRIVATEOID, "PRIVATEOID" },
@@ -3253,6 +3256,33 @@ ldns_key2buffer_str(ldns_buffer *output, const ldns_key *k)
 		        ldns_buffer_printf(output, "Algorithm: 165 (HMAC_SHA512)\n");
 				status = ldns_hmac_key2buffer_str(output, k);
 				break;
+#ifdef PQC_ALGO_FL_DSA
+			case LDNS_SIGN_FL_DSA_512:
+				ldns_buffer_printf(output, "Private-key-format: v1.2\n");
+				ldns_buffer_printf(output, "Algorithm: %d (", ldns_key_algorithm(k));
+				status = ldns_algorithm2buffer_str(output, (ldns_algorithm)ldns_key_algorithm(k));
+				ldns_buffer_printf(output, ")\n");
+				if (status) break;
+
+				if (k->_key.oqs && k->_key.oqs->sk && k->_key.oqs->pk) {
+					/* Output private key */
+					ldns_buffer_printf(output, "PrivateKey: ");
+					for (size_t i = 0; i < k->_key.oqs->sk_len; i++) {
+						ldns_buffer_printf(output, "%02x", k->_key.oqs->sk[i]);
+					}
+					ldns_buffer_printf(output, "\n");
+
+					/* Output public key for reference */
+					ldns_buffer_printf(output, "PublicKey: ");
+					for (size_t i = 0; i < k->_key.oqs->pk_len; i++) {
+						ldns_buffer_printf(output, "%02x", k->_key.oqs->pk[i]);
+					}
+					ldns_buffer_printf(output, "\n");
+				} else {
+					status = LDNS_STATUS_ERR;
+				}
+				break;
+#endif /* PQC_ALGO_FL_DSA */
 		}
 #endif /* HAVE_SSL */
 	} else {

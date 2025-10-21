@@ -24,6 +24,10 @@
 #endif
 #endif /* HAVE_SSL */
 
+#ifdef PQC_ALGO_FL_DSA
+#include <oqs/oqs.h>
+#endif
+
 #define LDNS_SIGN_WITH_ZONEMD ( LDNS_SIGN_WITH_ZONEMD_SIMPLE_SHA384 \
                               | LDNS_SIGN_WITH_ZONEMD_SIMPLE_SHA512 )
 
@@ -202,6 +206,39 @@ ldns_sign_public_buffer(ldns_buffer *sign_buf, ldns_key *current_key)
 				   ldns_key_evp_key(current_key),
 				   NULL);
                 break;
+#endif
+#ifdef PQC_ALGO_FL_DSA
+	case LDNS_SIGN_FL_DSA_512:
+	{
+		OQS_SIG *oqs_sig = OQS_SIG_new(LDNS_SIGN_FL_DSA_512_SCHEME);
+		if (!oqs_sig) {
+			return NULL;
+		}
+
+		unsigned char *message = (unsigned char*)ldns_buffer_begin(sign_buf);
+		size_t message_len = ldns_buffer_position(sign_buf);
+
+		unsigned char *signature = LDNS_XMALLOC(unsigned char, oqs_sig->length_signature);
+		if (!signature) {
+			OQS_SIG_free(oqs_sig);
+			return NULL;
+		}
+
+		size_t signature_len;
+
+		if (OQS_SIG_sign(oqs_sig, signature, &signature_len, message, message_len,
+		                 current_key->_key.oqs->sk) != OQS_SUCCESS) {
+			LDNS_FREE(signature);
+			OQS_SIG_free(oqs_sig);
+			return NULL;
+		}
+
+		b64rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_B64, signature_len, signature);
+
+		LDNS_FREE(signature);
+		OQS_SIG_free(oqs_sig);
+		break;
+	}
 #endif
 	case LDNS_SIGN_RSAMD5:
 		b64rdf = ldns_sign_public_evp(
